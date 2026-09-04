@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0D1B2A" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Bati'Coût" />
+  <title>Bati'Coût</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="assets/icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <section id="authScreen" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="brand brand-large">
+        <img src="assets/logo-mark.svg" alt="" />
+        <div>
+          <div class="brand-name">Bati'Coût</div>
+          <div class="brand-tagline">Suivez votre chantier au vrai prix</div>
+        </div>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="seg-btn active" data-auth-tab="login">Connexion</button>
+        <button class="seg-btn" data-auth-tab="signup">Créer un compte</button>
+      </div>
+
+      <form id="authForm" class="stack">
+        <label>
+          <span>Adresse e-mail</span>
+          <input id="authEmail" type="email" autocomplete="email" required placeholder="prenom@exemple.fr" />
+        </label>
+        <label>
+          <span>Mot de passe</span>
+          <input id="authPassword" type="password" minlength="6" autocomplete="current-password" required placeholder="6 caractères minimum" />
+        </label>
+        <button class="btn primary full" type="submit" id="authSubmit">Se connecter</button>
+      </form>
+
+      <button class="btn ghost full" id="demoButton">Continuer en mode démo local</button>
+      <p class="micro">Le mode démo fonctionne sans compte. La synchronisation multi-utilisateurs nécessite Supabase.</p>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <img class="top-logo" src="assets/logo-mark.svg" alt="" />
+        <div>
+          <button id="projectPicker" class="project-picker">
+            <strong id="projectNameHeader">Mon chantier</strong><span>⌄</span>
+          </button>
+          <div id="syncStatus" class="sync-status">Mode local</div>
+        </div>
+      </div>
+      <button id="menuBtn" class="icon-btn" aria-label="Menu">☰</button>
+    </header>
+
+    <main id="mainContent" class="content">
+      <!-- HOME -->
+      <section class="view active" data-view="home">
+        <div class="hero-card">
+          <div>
+            <p class="eyebrow">Vue d'ensemble</p>
+            <h1 id="heroProjectName">Mon chantier</h1>
+            <p id="heroSubtitle">Tout ce qu'il faut suivre, sans tableur à rallonge.</p>
+          </div>
+          <div class="hero-badge" id="heroBadge">V1.2</div>
+        </div>
+
+        <div class="kpi-grid">
+          <article class="kpi-card sage">
+            <div class="kpi-icon">€</div>
+            <div class="kpi-label">Dépenses</div>
+            <div class="kpi-value" id="kpiExpenses">0 €</div>
+            <div class="kpi-sub" id="kpiExpensesSub">0 dépense</div>
+          </article>
+          <article class="kpi-card lavender">
+            <div class="kpi-icon">◷</div>
+            <div class="kpi-label">Temps passé</div>
+            <div class="kpi-value" id="kpiHours">0 h</div>
+            <div class="kpi-sub" id="kpiHoursSub">0 saisie</div>
+          </article>
+          <article class="kpi-card terracotta">
+            <div class="kpi-icon">↗</div>
+            <div class="kpi-label">MO théorique</div>
+            <div class="kpi-value" id="kpiLabor">0 €</div>
+            <div class="kpi-sub">Valeur du temps passé</div>
+          </article>
+          <article class="kpi-card sand">
+            <div class="kpi-icon">Σ</div>
+            <div class="kpi-label">Valeur chantier</div>
+            <div class="kpi-value" id="kpiTotalValue">0 €</div>
+            <div class="kpi-sub">Dépenses + MO théorique</div>
+          </article>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Répartition</p>
+              <h2>Dépenses par lot</h2>
+            </div>
+            <button class="text-btn" data-go="bilan">Voir bilan</button>
+          </div>
+          <div class="chart-wrap"><canvas id="expenseChart"></canvas></div>
+          <div id="expenseLegend" class="legend"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Derniers mouvements</p>
+              <h2>Activité récente</h2>
+            </div>
+          </div>
+          <div id="recentActivity" class="activity-list empty-state">Aucune donnée pour le moment.</div>
+        </section>
+      </section>
+
+      <!-- EXPENSES -->
+      <section class="view" data-view="expenses">
+        <div class="page-head">
+          <div><p class="eyebrow">Suivi financier</p><h1>Dépenses</h1></div>
+          <button class="btn primary compact" data-action="open-expense">+ Ajouter</button>
+        </div>
+        <div class="filter-row">
+          <input id="expenseSearch" class="search" type="search" placeholder="Rechercher une dépense..." />
+          <select id="expenseLotFilter"><option value="">Tous les lots</option></select>
+        </div>
+        <div class="summary-strip">
+          <div><span>Total</span><strong id="expenseTotal">0 €</strong></div>
+          <div><span>Ce mois</span><strong id="expenseMonth">0 €</strong></div>
+          <div><span>Tickets</span><strong id="expenseCount">0</strong></div>
+        </div>
+        <div id="expenseList" class="card-list"></div>
+      </section>
+
+      <!-- TIME -->
+      <section class="view" data-view="time">
+        <div class="page-head">
+          <div><p class="eyebrow">Planning & pointage</p><h1>Temps passé</h1></div>
+          <button class="btn primary compact" data-action="open-time">+ Saisir</button>
+        </div>
+
+        <div class="timer-card">
+          <div>
+            <p class="eyebrow">Chronomètre chantier</p>
+            <h2 id="timerDisplay">00:00:00</h2>
+            <p id="timerTaskLabel">Sélectionne une tâche puis démarre.</p>
+          </div>
+          <button id="timerToggle" class="timer-button">▶</button>
+        </div>
+
+        <div class="week-nav">
+          <button id="prevWeek" class="icon-btn">‹</button>
+          <strong id="weekLabel">Cette semaine</strong>
+          <button id="nextWeek" class="icon-btn">›</button>
+        </div>
+        <div id="weekDays" class="week-days"></div>
+
+        <section class="panel flush-mobile">
+          <div class="panel-head"><div><p class="eyebrow">Détail</p><h2>Heures de la semaine</h2></div></div>
+          <div id="timeList" class="card-list"></div>
+        </section>
+      </section>
+
+      <!-- BILAN -->
+      <section class="view" data-view="bilan">
+        <div class="page-head">
+          <div><p class="eyebrow">Analyse</p><h1>Bilan</h1></div>
+          <button id="exportCsv" class="btn secondary compact">Exporter CSV</button>
+        </div>
+
+        <div class="bilan-tabs">
+          <button class="seg-btn active" data-bilan="global">Global</button>
+          <button class="seg-btn" data-bilan="expenses">Dépenses</button>
+          <button class="seg-btn" data-bilan="time">Temps</button>
+        </div>
+
+        <div class="bilan-highlight">
+          <span id="bilanHighlightLabel">Valeur théorique du chantier</span>
+          <strong id="bilanGrandTotal">0 €</strong>
+          <small id="bilanSentence">Commence à saisir tes dépenses et tes heures.</small>
+        </div>
+
+        <div data-bilan-section="global">
+          <div class="bilan-kpis">
+            <article><span>Budget lots</span><strong id="bilanBudgetTotal">0 €</strong><small id="bilanBudgetHint">Non paramétré</small></article>
+            <article><span>Dépensé</span><strong id="bilanSpentTotal">0 €</strong><small id="bilanSpentHint">0 % du budget</small></article>
+            <article><span>Reste budget</span><strong id="bilanRemainingTotal">0 €</strong><small id="bilanRemainingHint">Prévisionnel</small></article>
+            <article><span>MO théorique</span><strong id="bilanLaborTotal">0 €</strong><small id="bilanLaborHint">Temps valorisé</small></article>
+          </div>
+          <div class="two-col">
+            <section class="panel">
+              <div class="panel-head"><div><p class="eyebrow">Finances</p><h2>Dépenses par lot</h2></div></div>
+              <div class="chart-wrap"><canvas id="bilanExpenseChart"></canvas></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><div><p class="eyebrow">Temps</p><h2>Heures par lot</h2></div></div>
+              <div class="chart-wrap"><canvas id="bilanTimeChart"></canvas></div>
+            </section>
+          </div>
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">Pilotage</p><h2>Budget, dépenses et temps par lot</h2></div></div>
+            <div id="lotSummary" class="budget-table"></div>
+          </section>
+        </div>
+
+        <div class="hidden" data-bilan-section="expenses">
+          <div class="two-col">
+            <section class="panel">
+              <div class="panel-head"><div><p class="eyebrow">Dépenses</p><h2>Répartition par lot</h2></div></div>
+              <div class="chart-wrap"><canvas id="bilanExpenseOnlyChart"></canvas></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><div><p class="eyebrow">Qui a payé ?</p><h2>Dépenses par payeur</h2></div></div>
+              <div class="chart-wrap"><canvas id="bilanPayerChart"></canvas></div>
+            </section>
+          </div>
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">Budget par lot</p><h2>Prévu / dépensé / restant</h2></div></div>
+            <div id="bilanExpenseList" class="budget-list"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">Paiements</p><h2>Répartition par personne</h2></div></div>
+            <div id="bilanPayerList" class="rank-list"></div>
+          </section>
+        </div>
+
+        <div class="hidden" data-bilan-section="time">
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">Temps</p><h2>Répartition des heures</h2></div></div>
+            <div class="chart-wrap"><canvas id="bilanTimeOnlyChart"></canvas></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">Main-d'œuvre</p><h2>Temps, taux et valeur théorique par lot</h2></div></div>
+            <div id="bilanTimeList" class="time-budget-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section class="view" data-view="projects">
+        <div class="page-head">
+          <div><p class="eyebrow">Organisation</p><h1>Projets</h1></div>
+          <button class="btn primary compact" data-action="open-project">+ Projet</button>
+        </div>
+        <div id="projectList" class="project-list"></div>
+
+        <section class="panel lot-manager">
+          <div class="panel-head">
+            <div><p class="eyebrow">Paramétrage du projet</p><h2>Lots, budgets & taux de MO</h2></div>
+          </div>
+          <p class="micro">Chaque lot peut avoir un budget prévisionnel et un taux horaire théorique. Le taux est proposé automatiquement lors du pointage. Un lot déjà utilisé ne peut pas être supprimé.</p>
+          <form id="lotForm" class="lot-create-form">
+            <input id="newLotName" placeholder="Ex. Piscine, Façades, VRD…" required />
+            <input id="newLotBudget" type="number" min="0" step="100" placeholder="Budget €" />
+            <input id="newLotRate" type="number" min="0" step="1" value="45" placeholder="Taux €/h" />
+            <button class="btn primary compact" type="submit">+ Ajouter</button>
+          </form>
+          <div class="lot-config-head"><span>Lot</span><span>Budget</span><span>Taux MO</span><span></span></div>
+          <div id="lotList" class="lot-config-list"></div>
+          <div id="lotBudgetFooter" class="lot-budget-footer"></div>
+        </section>
+      </section>
+
+      <!-- TEAM -->
+      <section class="view" data-view="team">
+        <div class="page-head">
+          <div><p class="eyebrow">Collaboration</p><h1>Équipe</h1></div>
+          <button class="btn primary compact" data-action="open-invite">+ Inviter</button>
+        </div>
+        <div class="info-box">
+          Ajoute une personne avec l'adresse e-mail utilisée pour son compte Bati'Coût. Si elle n'a pas encore de compte, l'invitation sera rattachée à son adresse lors de son inscription.
+        </div>
+        <div id="teamList" class="card-list"></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-go="home"><span>⌂</span><small>Accueil</small></button>
+      <button class="nav-btn" data-go="expenses"><span>€</span><small>Dépenses</small></button>
+      <button class="nav-plus" id="quickAdd">+</button>
+      <button class="nav-btn" data-go="time"><span>◷</span><small>Temps</small></button>
+      <button class="nav-btn" data-go="bilan"><span>▥</span><small>Bilan</small></button>
+    </nav>
+  </div>
+
+  <!-- QUICK ADD -->
+  <div id="quickSheet" class="sheet-backdrop hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head"><h2>Ajouter au chantier</h2><button class="icon-btn" data-close>×</button></div>
+      <div class="quick-grid">
+        <button class="quick-card" data-action="scan-ticket"><span>▣</span><strong>Scanner un ticket</strong><small>Photo + lecture automatique</small></button>
+        <button class="quick-card" data-action="open-expense"><span>€</span><strong>Dépense manuelle</strong><small>Montant, lot et catégorie</small></button>
+        <button class="quick-card" data-action="open-time"><span>◷</span><strong>Ajouter du temps</strong><small>Heures et tâche réalisée</small></button>
+        <button class="quick-card" data-action="start-timer"><span>▶</span><strong>Lancer un chrono</strong><small>Pointage en direct</small></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MENU -->
+  <div id="menuSheet" class="sheet-backdrop hidden">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head"><h2>Bati'Coût</h2><button class="icon-btn" data-close>×</button></div>
+      <button class="menu-row" data-go="projects">▤ <span>Mes projets</span></button>
+      <button class="menu-row" data-go="team">♙ <span>Équipe & accès</span></button>
+      <button class="menu-row" id="installApp">＋ <span>Installer l'application</span></button>
+      <button class="menu-row" id="logoutBtn">↪ <span>Se déconnecter</span></button>
+    </div>
+  </div>
+
+  <!-- EXPENSE MODAL -->
+  <div id="expenseModal" class="modal-backdrop hidden">
+    <form id="expenseForm" class="modal">
+      <div class="modal-head"><div><p class="eyebrow" id="expenseModalEyebrow">Nouvelle saisie</p><h2 id="expenseModalTitle">Dépense</h2></div><button type="button" class="icon-btn" data-close>×</button></div>
+
+      <div id="scanZone" class="scan-zone">
+        <input id="receiptInput" type="file" accept="image/*" capture="environment" hidden />
+        <button type="button" id="receiptButton" class="scan-button">▣ <span>Photographier / choisir un ticket</span></button>
+        <div id="ocrStatus" class="micro"></div>
+        <img id="receiptPreview" class="receipt-preview hidden" alt="Aperçu du ticket" />
+        <div id="existingReceiptActions" class="existing-receipt-actions hidden">
+          <button type="button" id="viewExistingReceipt" class="btn secondary compact">Voir le ticket enregistré</button>
+          <span class="micro">Choisir une nouvelle image remplacera le ticket actuel.</span>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <label><span>Enseigne</span><input id="expenseMerchant" placeholder="Ex. Leroy Merlin" /></label>
+        <label><span>Date</span><input id="expenseDate" type="date" required /></label>
+        <label><span>Montant TTC (€)</span><input id="expenseAmount" type="number" step="0.01" min="0" required placeholder="0,00" /></label>
+        <label><span>TVA (€)</span><input id="expenseVat" type="number" step="0.01" min="0" placeholder="Facultatif" /></label>
+        <label><span>Catégorie</span>
+          <select id="expenseCategory">
+            <option>Matériaux</option><option>Outillage</option><option>Consommables</option>
+            <option>Location</option><option>Livraison / transport</option><option>Déchets</option>
+            <option>Sous-traitance</option><option>EPI / sécurité</option><option>Administratif</option><option>Divers</option>
+          </select>
+        </label>
+        <label><span>Lot par défaut</span><select id="expenseLot" required></select></label>
+        <label><span>Payé par</span><select id="expensePaidBy" required></select></label>
+        <label class="full-span"><span>Description</span><textarea id="expenseDescription" rows="3" placeholder="Ce qui a été acheté..."></textarea></label>
+      </div>
+
+      <section id="receiptLinesSection" class="receipt-lines-section hidden">
+        <div class="receipt-lines-head">
+          <div><p class="eyebrow">Répartition du ticket</p><h3>Lignes détectées</h3></div>
+          <button type="button" id="addReceiptLine" class="btn secondary compact">+ Ligne</button>
+        </div>
+        <p class="micro">Corrige les lignes si besoin puis associe chacune au bon lot. L'éventuel écart avec le total du ticket sera affecté au lot par défaut.</p>
+        <div id="receiptLines" class="receipt-lines"></div>
+        <div id="receiptLinesSummary" class="receipt-lines-summary"></div>
+      </section>
+
+      <button id="expenseSubmit" class="btn primary full" type="submit">Enregistrer la dépense</button>
+    </form>
+  </div>
+
+  <!-- TIME MODAL -->
+  <div id="timeModal" class="modal-backdrop hidden">
+    <form id="timeForm" class="modal">
+      <div class="modal-head"><div><p class="eyebrow">Nouvelle saisie</p><h2>Temps passé</h2></div><button type="button" class="icon-btn" data-close>×</button></div>
+      <div class="form-grid">
+        <label><span>Date</span><input id="timeDate" type="date" required /></label>
+        <label><span>Lot</span><select id="timeLot" required></select></label>
+        <label><span>Début</span><input id="timeStart" type="time" value="08:00" /></label>
+        <label><span>Fin</span><input id="timeEnd" type="time" value="12:00" /></label>
+        <label class="full-span"><span>Tâche</span><input id="timeTask" placeholder="Ex. Montage des murs" required /></label>
+        <label><span>Taux théorique (€/h)</span><input id="timeRate" type="number" min="0" step="1" value="45" required /><small id="timeRateHint" class="field-hint">Taux du lot</small></label>
+        <label><span>Durée forcée (h)</span><input id="timeDurationOverride" type="number" min="0" step="0.25" placeholder="Calcul auto" /></label>
+        <label class="full-span"><span>Note</span><textarea id="timeNotes" rows="3" placeholder="Facultatif"></textarea></label>
+      </div>
+      <button class="btn primary full" type="submit">Enregistrer les heures</button>
+    </form>
+  </div>
+
+  <!-- PROJECT MODAL -->
+  <div id="projectModal" class="modal-backdrop hidden">
+    <form id="projectForm" class="modal small">
+      <div class="modal-head"><div><p class="eyebrow">Nouveau</p><h2>Projet</h2></div><button type="button" class="icon-btn" data-close>×</button></div>
+      <div class="stack">
+        <label><span>Nom du chantier</span><input id="projectNameInput" required placeholder="Ex. Maison Aigueperse" /></label>
+        <label><span>Adresse / ville</span><input id="projectAddressInput" placeholder="Facultatif" /></label>
+        <label><span>Budget prévisionnel (€)</span><input id="projectBudgetInput" type="number" min="0" step="100" placeholder="Facultatif" /></label>
+      </div>
+      <button class="btn primary full" type="submit">Créer le projet</button>
+    </form>
+  </div>
+
+  <!-- INVITE MODAL -->
+  <div id="inviteModal" class="modal-backdrop hidden">
+    <form id="inviteForm" class="modal small">
+      <div class="modal-head"><div><p class="eyebrow">Collaboration</p><h2>Inviter</h2></div><button type="button" class="icon-btn" data-close>×</button></div>
+      <div class="stack">
+        <label><span>Adresse e-mail</span><input id="inviteEmail" type="email" required placeholder="prenom@exemple.fr" /></label>
+        <label><span>Rôle</span><select id="inviteRole"><option value="member">Membre</option><option value="viewer">Lecture seule</option><option value="admin">Administrateur</option></select></label>
+      </div>
+      <button class="btn primary full" type="submit">Ajouter au projet</button>
+    </form>
+  </div>
+
+
+  <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
