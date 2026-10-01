@@ -42,4 +42,8 @@ begin
 end;
 $$;
 
+-- Important : une fonction SECURITY DEFINER est exécutable par PUBLIC par défaut.
+-- On limite donc explicitement cet RPC aux utilisateurs authentifiés.
+revoke all on function public.delete_project(uuid) from public;
+revoke all on function public.delete_project(uuid) from anon;
 grant execute on function public.delete_project(uuid) to authenticated;
