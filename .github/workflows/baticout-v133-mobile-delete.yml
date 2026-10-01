@@ -12,221 +12,26 @@ jobs:
   integrate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Integrate V1.3 features into core files
-        shell: bash
+      - name: Integrate V1.3.4
+        run: python3 tools/integrate_v134.py
+
+      - name: Validate JavaScript
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_between(text, start, end, replacement):
-              i = text.index(start)
-              j = text.index(end, i)
-              return text[:i] + replacement + text[j:]
-
-          p = Path('app.js')
-          s = p.read_text(encoding='utf-8')
-
-          # State + helpers
-          s = s.replace(
-              'pendingReceiptItems: [], editingExpenseId: null, existingReceiptUrl: null',
-              'pendingReceiptItems: [], editingExpenseId: null, existingReceiptUrl: null, projectSpend: {}'
-          )
-          s = s.replace(
-              '  const hoursLabel = mins => { const h=Math.floor((mins||0)/60),m=Math.round((mins||0)%60); return m?`${h} h ${String(m).padStart(2,"0")}`:`${h} h`; };\n',
-              '  const hoursLabel = mins => { const h=Math.floor((mins||0)/60),m=Math.round((mins||0)%60); return m?`${h} h ${String(m).padStart(2,"0")}`:`${h} h`; };\n  const crewCount = x => Math.min(5,Math.max(1,Number(x?.crew_count||1)));\n  const effectiveMinutes = x => Number(x?.minutes||0)*crewCount(x);\n'
-          )
-
-          # Keep legacy local entries compatible.
-          s = s.replace(
-              '    state.expenses=(state.expenses||[]).map(x=>({...x,items:Array.isArray(x.items)?x.items:[],paid_by_user_id:x.paid_by_user_id||x.user_id||"demo"}));\n',
-              '    state.expenses=(state.expenses||[]).map(x=>({...x,items:Array.isArray(x.items)?x.items:[],paid_by_user_id:x.paid_by_user_id||x.user_id||"demo"}));\n    state.workLogs=(state.workLogs||[]).map(x=>({...x,crew_count:crewCount(x)}));\n'
-          )
-
-          # Load spend across every visible project.
-          s = replace_between(
-              s,
-              '  async function loadCloudData(){',
-              '  async function loadCurrentProjectData(){',
-              '''  async function loadCloudData(){
-    const [projectsResult,expensesResult]=await Promise.all([
-      sb.from("projects_visible").select("*").order("created_at",{ascending:true}),
-      sb.from("expenses").select("project_id,amount")
-    ]);
-    const {data:projects,error}=projectsResult;
-    if(error){toast("Impossible de charger les projets");console.error(error);return;}
-    if(expensesResult.error)console.error(expensesResult.error);
-    state.projects=projects||[];
-    state.projectSpend=(expensesResult.data||[]).reduce((g,x)=>{g[x.project_id]=(g[x.project_id]||0)+Number(x.amount||0);return g;},{});
-    if(!state.currentProjectId||!state.projects.some(p=>p.id===state.currentProjectId))state.currentProjectId=state.projects[0]?.id||null;
-    if(!state.currentProjectId){ await createProjectCloud({name:"Mon premier chantier",address:"",budget:0}); return loadCloudData(); }
-    await loadCurrentProjectData();
-  }
-'''
-          )
-
-          s = s.replace(
-              '    state.workLogs=w.data||[]; state.team=t.data||[]; state.lots=(state.lots||[]).filter(x=>x.project_id!==pid).concat(l.data||[]);\n',
-              '    state.workLogs=w.data||[]; state.team=t.data||[]; state.lots=(state.lots||[]).filter(x=>x.project_id!==pid).concat(l.data||[]);\n    state.projectSpend=state.projectSpend||{};state.projectSpend[pid]=state.expenses.reduce((sum,x)=>sum+Number(x.amount||0),0);\n'
-          )
-
-          # Effective team hours everywhere.
-          s = replace_between(
-              s,
-              '  function totals(){',
-              '  function expenseBreakdownByLot(){',
-              '''  function totals(){
-    const expenses=projectExpenses().reduce((sum,x)=>sum+Number(x.amount||0),0);
-    const minutes=projectLogs().reduce((sum,x)=>sum+effectiveMinutes(x),0);
-    const labor=projectLogs().reduce((sum,x)=>sum+(effectiveMinutes(x)/60)*Number(x.hourly_rate||0),0);
-    return {expenses,minutes,labor,total:expenses+labor};
-  }
-'''
-          )
-          s = s.replace(
-              '  function timeBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+Number(x.minutes||0)/60);return g; }',
-              '  function timeBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+effectiveMinutes(x)/60);return g; }'
-          )
-          s = s.replace(
-              '  function laborBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+(Number(x.minutes||0)/60)*Number(x.hourly_rate||0));return g; }',
-              '  function laborBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+(effectiveMinutes(x)/60)*Number(x.hourly_rate||0));return g; }'
-          )
-
-          # Time list: show effective hours and crew detail.
-          s = replace_between(
-              s,
-              '  function renderTime(){',
-              '  function renderBilan(){',
-              '''  function renderTime(){
-    const start=weekStart(state.weekOffset),end=new Date(start);end.setDate(end.getDate()+6);$("#weekLabel").textContent=`${fmtDate(dateISO(start))} — ${fmtDate(dateISO(end))}`;const today=dateISO();
-    $("#weekDays").innerHTML=[0,1,2,3,4,5,6].map(i=>{const d=new Date(start);d.setDate(d.getDate()+i);const iso=dateISO(d);return `<div class="day-chip ${iso===today?"active":""}"><span>${["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"][i]}</span><strong>${d.getDate()}</strong></div>`}).join("");
-    const startIso=dateISO(start),endIso=dateISO(end),logs=projectLogs().filter(x=>x.date>=startIso&&x.date<=endIso).sort((a,b)=>a.date.localeCompare(b.date)||String(a.start_time).localeCompare(String(b.start_time)));
-    $("#timeList").innerHTML=logs.length?logs.map(x=>{const c=crewCount(x),eff=effectiveMinutes(x),detail=c>1?`<small class="v13-crew-detail">${hoursLabel(x.minutes)} × ${c} personnes</small>`:"";return `<div class="list-card"><div class="list-icon">◷</div><div class="list-main"><strong>${escapeHtml(x.task)}</strong><small>${fmtDate(x.date)} · ${escapeHtml(x.lot)} · ${x.start_time?.slice(0,5)||""}${x.end_time?` → ${x.end_time.slice(0,5)}`:""} · ${money(x.hourly_rate)}/h</small>${detail}</div><div class="list-value">${hoursLabel(eff)}<br><button class="text-btn danger delete-time" data-id="${x.id}">Suppr.</button></div></div>`}).join(""):`<div class="empty-state">Aucune heure cette semaine.</div>`;
-    $$(".delete-time").forEach(b=>b.onclick=()=>deleteTime(b.dataset.id));
-  }
-
-'''
-          )
-
-          # Projects: spent amount + direct delete button.
-          s = replace_between(
-              s,
-              '  function renderProjects(){',
-              '  function lotUsage(name){',
-              '''  function renderProjects(){
-    const localSpend=(state.expenses||[]).reduce((g,x)=>{g[x.project_id]=(g[x.project_id]||0)+Number(x.amount||0);return g;},{});
-    $("#projectList").innerHTML=state.projects.map(p=>{
-      const isCurrent=p.id===state.currentProjectId;
-      const currentSpent=isCurrent?projectExpenses().reduce((sum,x)=>sum+Number(x.amount||0),0):null;
-      const spent=currentSpent??(mode==="cloud"?Number(state.projectSpend?.[p.id]||0):Number(localSpend[p.id]||0));
-      return `<article class="project-card ${isCurrent?"active":""}"><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.address||"Adresse non renseignée")}</p></div><div class="project-meta"><div><small>Dépensé</small><br><strong>${money(spent)}</strong></div><div class="v13-project-actions"><button class="btn secondary compact choose-project" data-id="${p.id}">${isCurrent?"Actif":"Ouvrir"}</button><button class="btn compact v13-danger delete-project" data-id="${p.id}">Supprimer</button></div></div></article>`;
-    }).join("");
-    $$(".choose-project").forEach(b=>b.onclick=()=>switchProject(b.dataset.id));
-    $$(".delete-project").forEach(b=>b.onclick=()=>deleteProject(b.dataset.id));
-  }
-'''
-          )
-
-          # Direct project deletion in the core app.
-          marker='  async function switchProject(id){state.currentProjectId=id;if(mode==="cloud")await loadCurrentProjectData();else localSave();renderAll();navigate("home");}\n'
-          if 'async function deleteProject(id)' not in s:
-              s=s.replace(marker, marker+'''  async function deleteProject(id){
-    const p=state.projects.find(x=>x.id===id),name=p?.name||"ce projet";
-    if(!confirm(`Supprimer définitivement « ${name} » ?\\n\\nDépenses, heures, lots, membres et tickets seront supprimés. Cette action est irréversible.`))return;
-    if(mode==="cloud"){
-      const {data:receipts,error:receiptError}=await sb.from("expenses").select("receipt_path").eq("project_id",id);
-      if(receiptError)console.error(receiptError);
-      const paths=(receipts||[]).map(x=>x.receipt_path).filter(Boolean);
-      if(paths.length){const storageResult=await sb.storage.from("receipts").remove(paths);if(storageResult.error)console.warn(storageResult.error);}
-      const {data:result,error}=await sb.rpc("delete_project",{p_project_id:id});
-      if(error)return toast(error.message);
-      if(result!=="deleted")return toast(result||"Suppression impossible.");
-      if(state.currentProjectId===id)state.currentProjectId=null;
-      await loadCloudData();
-    }else{
-      state.projects=state.projects.filter(x=>x.id!==id);state.expenses=state.expenses.filter(x=>x.project_id!==id);state.workLogs=state.workLogs.filter(x=>x.project_id!==id);state.lots=state.lots.filter(x=>x.project_id!==id);
-      if(state.currentProjectId===id)state.currentProjectId=state.projects[0]?.id||null;
-      if(!state.projects.length){const newId=uid();state.projects=[{id:newId,name:"Mon chantier",address:"",budget:0,role:"owner",created_at:new Date().toISOString()}];state.currentProjectId=newId;state.lots=DEFAULT_LOTS.map(name=>({id:uid(),project_id:newId,name,budget:0,hourly_rate:45}));}
-      localSave();
-    }
-    renderAll();navigate("projects");toast("Projet supprimé.");
-  }
-''')
-
-          # Manual time entry carries crew_count.
-          old_time='$("#timeForm").onsubmit=async e=>{e.preventDefault();const start=$("#timeStart").value,end=$("#timeEnd").value,override=Number($("#timeDurationOverride").value||0),mins=override?Math.round(override*60):minutesBetween(start,end);if(mins<=0)return toast("La durée doit être supérieure à zéro.");const ok=await addTime({date:$("#timeDate").value,start_time:start||null,end_time:end||null,minutes:mins,lot:$("#timeLot").value,task:$("#timeTask").value.trim(),hourly_rate:Number($("#timeRate").value||0),notes:$("#timeNotes").value.trim()});if(ok){e.currentTarget.reset();setFormDefaults();closeOverlays();toast("Temps enregistré.");}};'
-          new_time='$("#timeForm").onsubmit=async e=>{e.preventDefault();const start=$("#timeStart").value,end=$("#timeEnd").value,override=Number($("#timeDurationOverride").value||0),mins=override?Math.round(override*60):minutesBetween(start,end),crew=Math.min(5,Math.max(1,Number($("#timeCrewCount")?.value||1)));if(mins<=0)return toast("La durée doit être supérieure à zéro.");const ok=await addTime({date:$("#timeDate").value,start_time:start||null,end_time:end||null,minutes:mins,crew_count:crew,lot:$("#timeLot").value,task:$("#timeTask").value.trim(),hourly_rate:Number($("#timeRate").value||0),notes:$("#timeNotes").value.trim()});if(ok){e.currentTarget.reset();setFormDefaults();closeOverlays();toast(`${hoursLabel(mins*crew)} enregistrées (${hoursLabel(mins)} × ${crew}).`);}};'
-          if old_time not in s: raise SystemExit('time form block not found')
-          s=s.replace(old_time,new_time)
-
-          # Timer also stores team size.
-          s = replace_between(
-              s,
-              '  function startTimer(){',
-              '  function updateTimer(){',
-              '''  function startTimer(){
-    if(state.timer){stopTimer();return;}const lots=projectLots();if(!lots.length)return toast("Ajoute d'abord un lot au projet.");const list=lots.map((l,i)=>`${i+1}. ${l.name}`).join("\\n");const choice=Number(prompt(`Choisis le numéro du lot :\\n${list}`,"1"));const lotObj=lots[choice-1];if(!lotObj)return toast("Lot invalide.");const task=prompt("Tâche réalisée :","Travaux chantier");if(!task)return;const crew=Math.min(5,Math.max(1,Number(prompt("Combien de personnes ? (1 à 5)","1")||1))),rate=Number(lotObj.hourly_rate??45);state.timer={startedAt:Date.now(),lot:lotObj.name,task,rate,date:dateISO(),crew_count:crew};$("#timerTaskLabel").textContent=`${lotObj.name} · ${task} · ${crew} pers. · ${money(rate)}/h`;$("#timerToggle").textContent="■";updateTimer();state.timerInterval=setInterval(updateTimer,1000);closeOverlays();navigate("time");
-  }
-'''
-          )
-          s = replace_between(
-              s,
-              '  async function stopTimer(){',
-              '  function navigate(view){',
-              '''  async function stopTimer(){if(!state.timer)return;clearInterval(state.timerInterval);const mins=Math.max(1,Math.round((Date.now()-state.timer.startedAt)/60000)),t=state.timer;state.timer=null;$("#timerToggle").textContent="▶";$("#timerDisplay").textContent="00:00:00";$("#timerTaskLabel").textContent="Sélectionne une tâche puis démarre.";await addTime({date:t.date,start_time:null,end_time:null,minutes:mins,crew_count:t.crew_count||1,lot:t.lot,task:t.task,hourly_rate:t.rate,notes:"Chronométré avec Bati'Coût"});toast(`Chrono enregistré : ${hoursLabel(mins*(t.crew_count||1))}`);}
-
-'''
-          )
-
-          s=s.replace(
-              '  function setFormDefaults(){$("#expenseDate").value=dateISO();$("#timeDate").value=dateISO();$("#timeStart").value="08:00";$("#timeEnd").value="12:00";renderLotControls();renderPayerControl();applyLotRate(true);}',
-              '  function setFormDefaults(){$("#expenseDate").value=dateISO();$("#timeDate").value=dateISO();$("#timeStart").value="08:00";$("#timeEnd").value="12:00";if($("#timeCrewCount"))$("#timeCrewCount").value="1";renderLotControls();renderPayerControl();applyLotRate(true);}'
-          )
-
-          # CSV exports effective team hours.
-          s=s.replace(
-              'projectLogs().forEach(x=>rows.push(["TEMPS",x.date,x.lot,x.task,x.notes||"","","",(x.minutes/60).toFixed(2),x.hourly_rate,((x.minutes/60)*x.hourly_rate).toFixed(2),lotByName(x.lot)?.budget||0]));',
-              'projectLogs().forEach(x=>rows.push(["TEMPS",x.date,x.lot,x.task,`${x.notes||""}${crewCount(x)>1?` · ${crewCount(x)} personnes`:""}`,"","",(effectiveMinutes(x)/60).toFixed(2),x.hourly_rate,((effectiveMinutes(x)/60)*x.hourly_rate).toFixed(2),lotByName(x.lot)?.budget||0]));'
-          )
-
-          p.write_text(s,encoding='utf-8')
-
-          # Static styles: no dependency on the patch script.
-          p=Path('styles.css');css=p.read_text(encoding='utf-8')
-          marker='/* V1.3.4 core project/time controls */'
-          if marker not in css:
-              css += '''\n\n/* V1.3.4 core project/time controls */\n.btn.v13-danger{background:#F6DED5;color:#9F3E24;border:1px solid rgba(214,106,74,.25)}\n.v13-project-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}\n.v13-crew-detail{display:block;color:#6E746F;font-size:10px;font-weight:700;margin-top:3px}\n.v13-crew-field select{font-weight:800;color:#0D1B2A}\n@media(max-width:560px){.project-meta{gap:12px}.v13-project-actions{max-width:62%;justify-content:flex-end}.v13-project-actions .btn{padding:9px 10px;font-size:12px}}\n'''
-          p.write_text(css,encoding='utf-8')
-
-          # Force a clean browser/PWA refresh.
-          p=Path('index.html');html=p.read_text(encoding='utf-8')
-          html=html.replace('href="styles.css"','href="styles.css?v=1.3.4"')
-          html=html.replace('app.js?v=1.3.3','app.js?v=1.3.4')
-          html=html.replace('v1_3_patch.js?v=1.3.3','v1_3_patch.js?v=1.3.4')
-          p.write_text(html,encoding='utf-8')
-
-          p=Path('v1_3_patch.js');patch=p.read_text(encoding='utf-8').replace('const VERSION = "1.3.3";','const VERSION = "1.3.4";');p.write_text(patch,encoding='utf-8')
-
-          p=Path('sw.js');sw=p.read_text(encoding='utf-8')
-          sw=sw.replace('baticout-v1.3.3','baticout-v1.3.4').replace('./styles.css','./styles.css?v=1.3.4').replace('app.js?v=1.3.3','app.js?v=1.3.4').replace('v1_3_patch.js?v=1.3.3','v1_3_patch.js?v=1.3.4')
-          p.write_text(sw,encoding='utf-8')
-          PY
-
           node --check app.js
-          node --check v1_3_patch.js
           grep -q '<small>Dépensé</small>' app.js
           grep -q 'delete-project' app.js
           grep -q 'crew_count:crew' app.js
           grep -q 'baticout-v1.3.4' sw.js
 
-      - name: Commit core integration
-        shell: bash
+      - name: Commit core files
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app.js styles.css index.html v1_3_patch.js sw.js
-          git commit -m "Integrate V1.3 project delete, spend and crew hours into core app"
+          git add app.js styles.css index.html sw.js
+          git commit -m "Integrate V1.3.4 features into Bati'Coût core"
           git push
