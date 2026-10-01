@@ -15,7 +15,7 @@
   let state = {
     projects: [], currentProjectId: null, expenses: [], workLogs: [], team: [], lots: [],
     weekOffset: 0, bilanMode: "global", timer: null, timerInterval: null, charts: {},
-    pendingReceiptItems: [], editingExpenseId: null, existingReceiptUrl: null
+    pendingReceiptItems: [], editingExpenseId: null, existingReceiptUrl: null, projectSpend: {}
   };
 
   const $ = s => document.querySelector(s);
@@ -25,6 +25,8 @@
   const money = n => new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR",maximumFractionDigits:2}).format(Number(n||0));
   const pct = n => `${Math.round(Number(n||0))} %`;
   const hoursLabel = mins => { const h=Math.floor((mins||0)/60),m=Math.round((mins||0)%60); return m?`${h} h ${String(m).padStart(2,"0")}`:`${h} h`; };
+  const crewCount = x => Math.min(5,Math.max(1,Number(x?.crew_count||1)));
+  const effectiveMinutes = x => Number(x?.minutes||0)*crewCount(x);
   const dateISO = d => { const x=d?new Date(d):new Date(); const local=new Date(x.getTime()-x.getTimezoneOffset()*60000); return local.toISOString().slice(0,10); };
   const fmtDate = iso => !iso ? "" : new Intl.DateTimeFormat("fr-FR",{day:"2-digit",month:"short",year:"numeric"}).format(new Date(iso+"T12:00:00"));
   const roleLabel = r => ({owner:"Propriétaire",admin:"Administrateur",member:"Membre",viewer:"Lecture seule"}[r]||r);
@@ -72,6 +74,7 @@
 
   function migrateLocalState(){
     state.expenses=(state.expenses||[]).map(x=>({...x,items:Array.isArray(x.items)?x.items:[],paid_by_user_id:x.paid_by_user_id||x.user_id||"demo"}));
+    state.workLogs=(state.workLogs||[]).map(x=>({...x,crew_count:crewCount(x)}));
     if(!Array.isArray(state.lots)) state.lots=[];
     if(!Array.isArray(state.team)||!state.team.length) state.team=[{user_id:"demo",id:"demo",email:"mode.demo@local",display_name:"Vous",role:"admin"}];
     state.team=state.team.map(m=>({...m,user_id:m.user_id||m.id}));
@@ -109,13 +112,20 @@
   function enterLocal(){ mode="local";session={user:{id:"demo",email:"demo@local"}};localLoad();hide("#authScreen");show("#appShell");$("#syncStatus").textContent="Mode local";renderAll(); }
 
   async function loadCloudData(){
-    const {data:projects,error}=await sb.from("projects_visible").select("*").order("created_at",{ascending:true});
+    const [projectsResult,expensesResult]=await Promise.all([
+      sb.from("projects_visible").select("*").order("created_at",{ascending:true}),
+      sb.from("expenses").select("project_id,amount")
+    ]);
+    const {data:projects,error}=projectsResult;
     if(error){toast("Impossible de charger les projets");console.error(error);return;}
+    if(expensesResult.error)console.error(expensesResult.error);
     state.projects=projects||[];
+    state.projectSpend=(expensesResult.data||[]).reduce((g,x)=>{g[x.project_id]=(g[x.project_id]||0)+Number(x.amount||0);return g;},{});
     if(!state.currentProjectId||!state.projects.some(p=>p.id===state.currentProjectId))state.currentProjectId=state.projects[0]?.id||null;
     if(!state.currentProjectId){ await createProjectCloud({name:"Mon premier chantier",address:"",budget:0}); return loadCloudData(); }
     await loadCurrentProjectData();
   }
+
   async function loadCurrentProjectData(){
     if(mode!=="cloud"||!state.currentProjectId)return;
     const pid=state.currentProjectId;
@@ -128,14 +138,16 @@
     [e,w,t,l].forEach(r=>r.error&&console.error(r.error));
     state.expenses=(e.data||[]).map(x=>({...x,items:x.expense_items||[]}));
     state.workLogs=w.data||[]; state.team=t.data||[]; state.lots=(state.lots||[]).filter(x=>x.project_id!==pid).concat(l.data||[]);
+    state.projectSpend=state.projectSpend||{};state.projectSpend[pid]=state.expenses.reduce((sum,x)=>sum+Number(x.amount||0),0);
   }
 
   function totals(){
-    const expenses=projectExpenses().reduce((s,x)=>s+Number(x.amount||0),0);
-    const minutes=projectLogs().reduce((s,x)=>s+Number(x.minutes||0),0);
-    const labor=projectLogs().reduce((s,x)=>s+(Number(x.minutes||0)/60)*Number(x.hourly_rate||0),0);
+    const expenses=projectExpenses().reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const minutes=projectLogs().reduce((sum,x)=>sum+effectiveMinutes(x),0);
+    const labor=projectLogs().reduce((sum,x)=>sum+(effectiveMinutes(x)/60)*Number(x.hourly_rate||0),0);
     return {expenses,minutes,labor,total:expenses+labor};
   }
+
   function expenseBreakdownByLot(){
     const g={};
     projectExpenses().forEach(x=>{
@@ -149,8 +161,8 @@
     return g;
   }
   function budgetBreakdownByLot(){ const g={}; projectLots().forEach(l=>g[l.name]=Number(l.budget||0)); return g; }
-  function timeBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+Number(x.minutes||0)/60);return g; }
-  function laborBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+(Number(x.minutes||0)/60)*Number(x.hourly_rate||0));return g; }
+  function timeBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+effectiveMinutes(x)/60);return g; }
+  function laborBreakdownByLot(){ const g={};projectLogs().forEach(x=>g[x.lot||"Divers"]=(g[x.lot||"Divers"]||0)+(effectiveMinutes(x)/60)*Number(x.hourly_rate||0));return g; }
   function expenseLots(x){ const arr=(x.items||[]).map(i=>i.lot).filter(Boolean); if(x.lot)arr.push(x.lot); return [...new Set(arr)]; }
   function teamMember(userId){ return state.team.find(m=>(m.user_id||m.id)===userId); }
   function payerLabel(x){ const m=teamMember(x.paid_by_user_id||x.user_id); return m?.display_name||m?.email||"Non renseigné"; }
@@ -203,8 +215,9 @@
   function renderTime(){
     const start=weekStart(state.weekOffset),end=new Date(start);end.setDate(end.getDate()+6);$("#weekLabel").textContent=`${fmtDate(dateISO(start))} — ${fmtDate(dateISO(end))}`;const today=dateISO();
     $("#weekDays").innerHTML=[0,1,2,3,4,5,6].map(i=>{const d=new Date(start);d.setDate(d.getDate()+i);const iso=dateISO(d);return `<div class="day-chip ${iso===today?"active":""}"><span>${["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"][i]}</span><strong>${d.getDate()}</strong></div>`}).join("");
-    const s=dateISO(start),e=dateISO(end),logs=projectLogs().filter(x=>x.date>=s&&x.date<=e).sort((a,b)=>a.date.localeCompare(b.date)||String(a.start_time).localeCompare(String(b.start_time)));
-    $("#timeList").innerHTML=logs.length?logs.map(x=>`<div class="list-card"><div class="list-icon">◷</div><div class="list-main"><strong>${escapeHtml(x.task)}</strong><small>${fmtDate(x.date)} · ${escapeHtml(x.lot)} · ${x.start_time?.slice(0,5)||""}${x.end_time?` → ${x.end_time.slice(0,5)}`:""} · ${money(x.hourly_rate)}/h</small></div><div class="list-value">${hoursLabel(x.minutes)}<br><button class="text-btn danger delete-time" data-id="${x.id}">Suppr.</button></div></div>`).join(""):`<div class="empty-state">Aucune heure cette semaine.</div>`;$$(".delete-time").forEach(b=>b.onclick=()=>deleteTime(b.dataset.id));
+    const startIso=dateISO(start),endIso=dateISO(end),logs=projectLogs().filter(x=>x.date>=startIso&&x.date<=endIso).sort((a,b)=>a.date.localeCompare(b.date)||String(a.start_time).localeCompare(String(b.start_time)));
+    $("#timeList").innerHTML=logs.length?logs.map(x=>{const c=crewCount(x),eff=effectiveMinutes(x),detail=c>1?`<small class="v13-crew-detail">${hoursLabel(x.minutes)} × ${c} personnes</small>`:"";return `<div class="list-card"><div class="list-icon">◷</div><div class="list-main"><strong>${escapeHtml(x.task)}</strong><small>${fmtDate(x.date)} · ${escapeHtml(x.lot)} · ${x.start_time?.slice(0,5)||""}${x.end_time?` → ${x.end_time.slice(0,5)}`:""} · ${money(x.hourly_rate)}/h</small>${detail}</div><div class="list-value">${hoursLabel(eff)}<br><button class="text-btn danger delete-time" data-id="${x.id}">Suppr.</button></div></div>`}).join(""):`<div class="empty-state">Aucune heure cette semaine.</div>`;
+    $$(".delete-time").forEach(b=>b.onclick=()=>deleteTime(b.dataset.id));
   }
 
   function renderBilan(){
@@ -239,8 +252,18 @@
   function renderRankList(selector,data,formatter){const entries=Object.entries(data).sort((a,b)=>b[1]-a[1]),max=entries[0]?.[1]||1;$(selector).innerHTML=entries.length?entries.map(([k,v])=>`<div class="rank-row"><div class="rank-name"><strong>${escapeHtml(k)}</strong></div><div class="rank-bar"><span style="width:${Math.max(3,(v/max)*100)}%"></span></div><div class="rank-value">${formatter(v)}</div></div>`).join(""):`<div class="empty-state">Aucune donnée.</div>`;}
 
   function renderProjects(){
-    $("#projectList").innerHTML=state.projects.map(p=>{const isCurrent=p.id===state.currentProjectId;const pLots=state.lots.filter(l=>l.project_id===p.id),lotBudget=pLots.reduce((s,l)=>s+Number(l.budget||0),0);return `<article class="project-card ${isCurrent?"active":""}"><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.address||"Adresse non renseignée")}</p></div><div class="project-meta"><div><small>Budget lots</small><br><strong>${money(lotBudget||p.budget||0)}</strong></div><button class="btn secondary compact choose-project" data-id="${p.id}">${isCurrent?"Actif":"Ouvrir"}</button></div></article>`}).join("");$$(".choose-project").forEach(b=>b.onclick=()=>switchProject(b.dataset.id));
+    const localSpend=(state.expenses||[]).reduce((g,x)=>{g[x.project_id]=(g[x.project_id]||0)+Number(x.amount||0);return g;},{});
+    $("#projectList").innerHTML=state.projects.map(p=>{
+      const isCurrent=p.id===state.currentProjectId;
+      const currentSpent=isCurrent?projectExpenses().reduce((sum,x)=>sum+Number(x.amount||0),0):null;
+      const spent=currentSpent??(mode==="cloud"?Number(state.projectSpend?.[p.id]||0):Number(localSpend[p.id]||0));
+      const canDelete=mode!=="cloud"||["owner","admin"].includes(p.role);
+      return `<article class="project-card ${isCurrent?"active":""}"><div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.address||"Adresse non renseignée")}</p></div><div class="project-meta"><div><small>Dépensé</small><br><strong>${money(spent)}</strong></div><div class="v13-project-actions"><button class="btn secondary compact choose-project" data-id="${p.id}">${isCurrent?"Actif":"Ouvrir"}</button>${canDelete?`<button class="btn compact v13-danger delete-project" data-id="${p.id}">Supprimer</button>`:""}</div></div></article>`;
+    }).join("");
+    $$(".choose-project").forEach(b=>b.onclick=()=>switchProject(b.dataset.id));
+    $$(".delete-project").forEach(b=>b.onclick=()=>deleteProject(b.dataset.id));
   }
+
   function lotUsage(name){ let expense=0,line=0,time=0;projectExpenses().forEach(x=>{if(x.lot===name)expense++;(x.items||[]).forEach(i=>{if(i.lot===name)line++;});});projectLogs().forEach(x=>{if(x.lot===name)time++;});return {expense,line,time,total:expense+line+time}; }
   function renderLots(){
     const el=$("#lotList");if(!el)return;const lots=projectLots();
@@ -317,6 +340,27 @@
   async function createProjectCloud(p){const {data,error}=await sb.rpc("create_project_with_owner",{p_name:p.name,p_address:p.address||"",p_budget:Number(p.budget||0)});if(error){toast(error.message);return null;}return data;}
   async function createProject(p){if(mode==="cloud"){const id=await createProjectCloud(p);if(!id)return;state.currentProjectId=id;await loadCloudData();}else{const pr={id:uid(),created_at:new Date().toISOString(),role:"admin",...p};state.projects.push(pr);state.currentProjectId=pr.id;DEFAULT_LOTS.forEach(name=>state.lots.push({id:uid(),project_id:pr.id,name,budget:0,hourly_rate:45}));localSave();}renderAll();navigate("home");}
   async function switchProject(id){state.currentProjectId=id;if(mode==="cloud")await loadCurrentProjectData();else localSave();renderAll();navigate("home");}
+  async function deleteProject(id){
+    const p=state.projects.find(x=>x.id===id),name=p?.name||"ce projet";
+    if(!confirm(`Supprimer définitivement « ${name} » ?\n\nDépenses, heures, lots, membres et tickets seront supprimés. Cette action est irréversible.`))return;
+    if(mode==="cloud"){
+      const {data:receipts,error:receiptError}=await sb.from("expenses").select("receipt_path").eq("project_id",id);
+      if(receiptError)console.error(receiptError);
+      const paths=(receipts||[]).map(x=>x.receipt_path).filter(Boolean);
+      if(paths.length){const storageResult=await sb.storage.from("receipts").remove(paths);if(storageResult.error)console.warn(storageResult.error);}
+      const {data:result,error}=await sb.rpc("delete_project",{p_project_id:id});
+      if(error)return toast(error.message);
+      if(result!=="deleted")return toast(result||"Suppression impossible.");
+      if(state.currentProjectId===id)state.currentProjectId=null;
+      await loadCloudData();
+    }else{
+      state.projects=state.projects.filter(x=>x.id!==id);state.expenses=state.expenses.filter(x=>x.project_id!==id);state.workLogs=state.workLogs.filter(x=>x.project_id!==id);state.lots=state.lots.filter(x=>x.project_id!==id);
+      if(state.currentProjectId===id)state.currentProjectId=state.projects[0]?.id||null;
+      if(!state.projects.length){const newId=uid();state.projects=[{id:newId,name:"Mon chantier",address:"",budget:0,role:"owner",created_at:new Date().toISOString()}];state.currentProjectId=newId;state.lots=DEFAULT_LOTS.map(name=>({id:uid(),project_id:newId,name,budget:0,hourly_rate:45}));}
+      localSave();
+    }
+    renderAll();navigate("projects");toast("Projet supprimé.");
+  }
   async function inviteMember(email,role){if(mode==="local"){toast("Les invitations nécessitent la synchronisation Supabase.");return;}const {data,error}=await sb.rpc("invite_project_member",{p_project_id:state.currentProjectId,p_email:email,p_role:role});if(error){toast(error.message);return;}toast(data==="added"?"Membre ajouté.":"Invitation enregistrée.");await loadCurrentProjectData();renderTeam();renderPayerControl();}
 
   async function scanReceipt(file){
@@ -357,14 +401,15 @@
   }
 
   function startTimer(){
-    if(state.timer){stopTimer();return;}const lots=projectLots();if(!lots.length)return toast("Ajoute d'abord un lot au projet.");const list=lots.map((l,i)=>`${i+1}. ${l.name}`).join("\n");const choice=Number(prompt(`Choisis le numéro du lot :\n${list}`,"1"));const lotObj=lots[choice-1];if(!lotObj)return toast("Lot invalide.");const task=prompt("Tâche réalisée :","Travaux chantier");if(!task)return;const rate=Number(lotObj.hourly_rate??45);state.timer={startedAt:Date.now(),lot:lotObj.name,task,rate,date:dateISO()};$("#timerTaskLabel").textContent=`${lotObj.name} · ${task} · ${money(rate)}/h`;$("#timerToggle").textContent="■";updateTimer();state.timerInterval=setInterval(updateTimer,1000);closeOverlays();navigate("time");
+    if(state.timer){stopTimer();return;}const lots=projectLots();if(!lots.length)return toast("Ajoute d'abord un lot au projet.");const list=lots.map((l,i)=>`${i+1}. ${l.name}`).join("\n");const choice=Number(prompt(`Choisis le numéro du lot :\n${list}`,"1"));const lotObj=lots[choice-1];if(!lotObj)return toast("Lot invalide.");const task=prompt("Tâche réalisée :","Travaux chantier");if(!task)return;const crew=Math.min(5,Math.max(1,Number(prompt("Combien de personnes ? (1 à 5)","1")||1))),rate=Number(lotObj.hourly_rate??45);state.timer={startedAt:Date.now(),lot:lotObj.name,task,rate,date:dateISO(),crew_count:crew};$("#timerTaskLabel").textContent=`${lotObj.name} · ${task} · ${crew} pers. · ${money(rate)}/h`;$("#timerToggle").textContent="■";updateTimer();state.timerInterval=setInterval(updateTimer,1000);closeOverlays();navigate("time");
   }
+
   function updateTimer(){if(!state.timer)return;const sec=Math.floor((Date.now()-state.timer.startedAt)/1000),h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;$("#timerDisplay").textContent=[h,m,s].map(x=>String(x).padStart(2,"0")).join(":");}
-  async function stopTimer(){if(!state.timer)return;clearInterval(state.timerInterval);const mins=Math.max(1,Math.round((Date.now()-state.timer.startedAt)/60000)),t=state.timer;state.timer=null;$("#timerToggle").textContent="▶";$("#timerDisplay").textContent="00:00:00";$("#timerTaskLabel").textContent="Sélectionne une tâche puis démarre.";await addTime({date:t.date,start_time:null,end_time:null,minutes:mins,lot:t.lot,task:t.task,hourly_rate:t.rate,notes:"Chronométré avec Bati'Coût"});toast(`Chrono enregistré : ${hoursLabel(mins)}`);}
+  async function stopTimer(){if(!state.timer)return;clearInterval(state.timerInterval);const mins=Math.max(1,Math.round((Date.now()-state.timer.startedAt)/60000)),t=state.timer;state.timer=null;$("#timerToggle").textContent="▶";$("#timerDisplay").textContent="00:00:00";$("#timerTaskLabel").textContent="Sélectionne une tâche puis démarre.";await addTime({date:t.date,start_time:null,end_time:null,minutes:mins,crew_count:t.crew_count||1,lot:t.lot,task:t.task,hourly_rate:t.rate,notes:"Chronométré avec Bati'Coût"});toast(`Chrono enregistré : ${hoursLabel(mins*(t.crew_count||1))}`);}
 
   function navigate(view){$$(".view").forEach(v=>v.classList.toggle("active",v.dataset.view===view));$$(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.go===view));closeOverlays();window.scrollTo({top:0,behavior:"smooth"});if(view==="bilan")setTimeout(renderBilan,50);}
   function minutesBetween(a,b){if(!a||!b)return 0;const [ah,am]=a.split(":").map(Number),[bh,bm]=b.split(":").map(Number);let m=(bh*60+bm)-(ah*60+am);if(m<0)m+=1440;return m;}
-  function setFormDefaults(){$("#expenseDate").value=dateISO();$("#timeDate").value=dateISO();$("#timeStart").value="08:00";$("#timeEnd").value="12:00";renderLotControls();renderPayerControl();applyLotRate(true);}
+  function setFormDefaults(){$("#expenseDate").value=dateISO();$("#timeDate").value=dateISO();$("#timeStart").value="08:00";$("#timeEnd").value="12:00";if($("#timeCrewCount"))$("#timeCrewCount").value="1";renderLotControls();renderPayerControl();applyLotRate(true);}
   function resetExpenseForm(){ $("#expenseForm").reset();state.pendingReceiptItems=[];state.editingExpenseId=null;state.existingReceiptUrl=null;$("#expenseModalEyebrow").textContent="Nouvelle saisie";$("#expenseModalTitle").textContent="Dépense";$("#expenseSubmit").textContent="Enregistrer la dépense";$("#receiptInput").value="";$("#expenseDate").value=dateISO();$("#receiptPreview").classList.add("hidden");$("#receiptPreview").removeAttribute("src");$("#ocrStatus").textContent="";hide("#receiptLinesSection");hide("#existingReceiptActions");renderLotControls();renderPayerControl(); }
 
   function bindUI(){
@@ -375,7 +420,7 @@
     $("#authForm").onsubmit=async e=>{e.preventDefault();if(!cloudEnabled){toast("Configure Supabase ou utilise le mode démo.");return;}const email=$("#authEmail").value.trim(),password=$("#authPassword").value,signup=e.currentTarget.dataset.mode==="signup";const result=signup?await sb.auth.signUp({email,password,options:{data:{display_name:email.split("@")[0]}}}):await sb.auth.signInWithPassword({email,password});if(result.error)return toast(result.error.message);if(signup&&!result.data.session)toast("Compte créé : vérifie ton e-mail pour confirmer l'inscription.");};
     $("#expenseForm").onsubmit=async e=>{e.preventDefault();const items=state.pendingReceiptItems.filter(i=>Number(i.amount)>0&&i.description.trim()).map(i=>({id:i.id,description:i.description.trim(),amount:Number(i.amount),lot:i.lot||$("#expenseLot").value}));const total=Number($("#expenseAmount").value),sum=items.reduce((s,i)=>s+i.amount,0);if(items.length&&sum>total+0.05)return toast("Le total des lignes dépasse le total du ticket. Corrige un montant avant d'enregistrer.");const payload={merchant:$("#expenseMerchant").value.trim(),date:$("#expenseDate").value,amount:total,vat:$("#expenseVat").value?Number($("#expenseVat").value):null,category:$("#expenseCategory").value,lot:$("#expenseLot").value,description:$("#expenseDescription").value.trim(),paid_by_user_id:$("#expensePaidBy").value||currentUserId()};const file=$("#receiptInput").files[0];const ok=state.editingExpenseId?await updateExpense(state.editingExpenseId,payload,file,items):await addExpense(payload,file,items);if(ok){const wasEdit=!!state.editingExpenseId;resetExpenseForm();closeOverlays();toast(wasEdit?"Dépense et lignes mises à jour.":(items.length?"Ticket enregistré et réparti par lot.":"Dépense enregistrée."));}};
     $("#timeLot").onchange=()=>applyLotRate(true);
-    $("#timeForm").onsubmit=async e=>{e.preventDefault();const start=$("#timeStart").value,end=$("#timeEnd").value,override=Number($("#timeDurationOverride").value||0),mins=override?Math.round(override*60):minutesBetween(start,end);if(mins<=0)return toast("La durée doit être supérieure à zéro.");const ok=await addTime({date:$("#timeDate").value,start_time:start||null,end_time:end||null,minutes:mins,lot:$("#timeLot").value,task:$("#timeTask").value.trim(),hourly_rate:Number($("#timeRate").value||0),notes:$("#timeNotes").value.trim()});if(ok){e.currentTarget.reset();setFormDefaults();closeOverlays();toast("Temps enregistré.");}};
+    $("#timeForm").onsubmit=async e=>{e.preventDefault();const start=$("#timeStart").value,end=$("#timeEnd").value,override=Number($("#timeDurationOverride").value||0),mins=override?Math.round(override*60):minutesBetween(start,end),crew=Math.min(5,Math.max(1,Number($("#timeCrewCount")?.value||1)));if(mins<=0)return toast("La durée doit être supérieure à zéro.");const ok=await addTime({date:$("#timeDate").value,start_time:start||null,end_time:end||null,minutes:mins,crew_count:crew,lot:$("#timeLot").value,task:$("#timeTask").value.trim(),hourly_rate:Number($("#timeRate").value||0),notes:$("#timeNotes").value.trim()});if(ok){e.currentTarget.reset();setFormDefaults();closeOverlays();toast(`${hoursLabel(mins*crew)} enregistrées (${hoursLabel(mins)} × ${crew}).`);}};
     $("#projectForm").onsubmit=async e=>{e.preventDefault();await createProject({name:$("#projectNameInput").value.trim(),address:$("#projectAddressInput").value.trim(),budget:Number($("#projectBudgetInput").value||0)});e.currentTarget.reset();closeOverlays();};
     $("#lotForm").onsubmit=async e=>{e.preventDefault();const ok=await addLot($("#newLotName").value,Number($("#newLotBudget").value||0),Number($("#newLotRate").value||45));if(ok){e.currentTarget.reset();$("#newLotRate").value="45";}};
     $("#inviteForm").onsubmit=async e=>{e.preventDefault();await inviteMember($("#inviteEmail").value.trim().toLowerCase(),$("#inviteRole").value);e.currentTarget.reset();closeOverlays();};
@@ -387,7 +432,7 @@
   function exportCSV(){
     const rows=[["TYPE","DATE","LOT","CATEGORIE/TACHE","DESCRIPTION","PAYE_PAR","MONTANT","HEURES","TAUX_MO","VALEUR_MO","BUDGET_LOT"]];
     projectExpenses().forEach(x=>{rows.push(["DEPENSE",x.date,x.lot,x.category,(x.merchant||"")+" "+(x.description||""),payerLabel(x),x.amount,"","","",lotByName(x.lot)?.budget||0]);(x.items||[]).forEach(i=>rows.push(["LIGNE_TICKET",x.date,i.lot,x.category,i.description,payerLabel(x),i.amount,"","","",lotByName(i.lot)?.budget||0]));});
-    projectLogs().forEach(x=>rows.push(["TEMPS",x.date,x.lot,x.task,x.notes||"","","",(x.minutes/60).toFixed(2),x.hourly_rate,((x.minutes/60)*x.hourly_rate).toFixed(2),lotByName(x.lot)?.budget||0]));
+    projectLogs().forEach(x=>rows.push(["TEMPS",x.date,x.lot,x.task,`${x.notes||""}${crewCount(x)>1?` · ${crewCount(x)} personnes`:""}`,"","",(effectiveMinutes(x)/60).toFixed(2),x.hourly_rate,((effectiveMinutes(x)/60)*x.hourly_rate).toFixed(2),lotByName(x.lot)?.budget||0]));
     projectLots().forEach(l=>rows.push(["PARAM_LOT","",l.name,"","","","","",l.hourly_rate,"",l.budget]));
     const csv="\ufeff"+rows.map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download=`baticout-${dateISO()}.csv`;a.click();URL.revokeObjectURL(a.href);
   }
