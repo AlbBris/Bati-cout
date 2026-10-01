@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "1.3.0";
+  const VERSION = "1.3.2";
   const STORAGE_KEY = "baticout_v1";
   const DEFAULT_LOTS = ["Terrassement","Gros œuvre","Maçonnerie","Charpente","Couverture","Menuiseries","Isolation","Placo","Électricité","Plomberie","Chauffage","Carrelage","Peinture","Aménagement extérieur","Divers"];
   const cfg = window.BATICOUT_CONFIG || {};
@@ -131,7 +131,7 @@
       if(info){setText(info.querySelector("small"),"Dépensé");setText(info.querySelector("strong"),money(spend[pid]||0));}
       if(meta&&!meta.querySelector(".v13-project-actions")){
         const actions=document.createElement("div");actions.className="v13-project-actions";open.parentNode.insertBefore(actions,open);actions.appendChild(open);
-        if(!cloud||roles[pid]==="owner"){
+        if(!cloud||["owner","admin"].includes(roles[pid])){
           const del=document.createElement("button");del.type="button";del.className="btn compact v13-danger v13-delete-project";del.dataset.id=pid;del.textContent="Supprimer";del.onclick=()=>deleteProject(pid);actions.appendChild(del);
         }
       }
@@ -140,7 +140,7 @@
 
   async function deleteProject(pid){
     const p=data.projects.find(x=>x.id===pid),name=p?.name||"ce projet";
-    if(cloud&&p?.role!=="owner")return toast("Seul le propriétaire peut supprimer un projet.");
+    if(cloud&&!['owner','admin'].includes(p?.role))return toast("Seul un propriétaire ou administrateur peut supprimer un projet.");
     if(!confirm(`Supprimer définitivement « ${name} » ?\n\nDépenses, heures, lots, membres et tickets seront supprimés. Cette action est irréversible.`))return;
     if(cloud){
       const paths=data.expenses.filter(x=>x.project_id===pid&&x.receipt_path).map(x=>x.receipt_path);
