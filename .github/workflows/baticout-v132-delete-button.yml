@@ -1,0 +1,57 @@
+name: Bati'Coût V1.3.2 delete button fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/baticout-v132-delete-button.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix delete button visibility
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('v1_3_patch.js')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('if(!cloud||roles[pid]==="owner"){', 'if(!cloud||["owner","admin"].includes(roles[pid])){')
+          s = s.replace('if(cloud&&p?.role!=="owner")return toast("Seul le propriétaire peut supprimer un projet.");', 'if(cloud&&!['"'"'owner'"'"','"'"'admin'"'"'].includes(p?.role))return toast("Seul un propriétaire ou administrateur peut supprimer un projet.");')
+          s = s.replace('const VERSION = "1.3.0";', 'const VERSION = "1.3.2";')
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('app.js?v=1.3.1', 'app.js?v=1.3.2')
+          s = s.replace('v1_3_patch.js?v=1.3.1', 'v1_3_patch.js?v=1.3.2')
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('sw.js')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('baticout-v1.3.1', 'baticout-v1.3.2')
+          s = s.replace('app.js?v=1.3.1', 'app.js?v=1.3.2')
+          s = s.replace('v1_3_patch.js?v=1.3.1', 'v1_3_patch.js?v=1.3.2')
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          grep -q '\["owner","admin"\].includes(roles\[pid\])' v1_3_patch.js
+          grep -q '1.3.2' index.html
+          grep -q 'baticout-v1.3.2' sw.js
+
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add v1_3_patch.js index.html sw.js
+          git commit -m "Fix project delete button for admins"
+          git push
