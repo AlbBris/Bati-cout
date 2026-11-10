@@ -18,6 +18,9 @@
     pendingReceiptItems: [], editingExpenseId: null, existingReceiptUrl: null, projectSpend: {}
   };
 
+  let editingTimeId = null;
+  let timeEntryMode = "direct";
+
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
   const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -179,7 +182,7 @@
     $("#kpiLabor").textContent=money(t.labor);$("#kpiTotalValue").textContent=money(t.total);
     const grouped=expenseBreakdownByLot();drawDoughnut("expenseChart",grouped);
     $("#expenseLegend").innerHTML=Object.entries(grouped).sort((a,b)=>b[1]-a[1]).map(([k,v],i)=>`<div class="legend-item"><span class="legend-dot" style="background:${COLORS[i%COLORS.length]}"></span>${escapeHtml(k)} <strong>${money(v)}</strong></div>`).join("");
-    const acts=[...ex.map(x=>({type:"expense",date:x.date,title:x.merchant||x.description||"Dépense",sub:`${expenseLots(x).join(" · ")||"Divers"} · payé par ${payerLabel(x)}`,value:`− ${money(x.amount)}`})),...logs.map(x=>({type:"time",date:x.date,title:x.task||"Temps chantier",sub:`${x.lot} · ${hoursLabel(x.minutes)}`,value:money((x.minutes/60)*x.hourly_rate)}))].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,6);
+    const acts=[...ex.map(x=>({type:"expense",date:x.date,title:x.merchant||x.description||"Dépense",sub:`${expenseLots(x).join(" · ")||"Divers"} · payé par ${payerLabel(x)}`,value:`− ${money(x.amount)}`})),...logs.map(x=>({type:"time",date:x.date,title:x.task||"Temps chantier",sub:`${x.lot} · ${hoursLabel(effectiveMinutes(x))}`,value:money((effectiveMinutes(x)/60)*x.hourly_rate)}))].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,6);
     $("#recentActivity").classList.toggle("empty-state",!acts.length);$("#recentActivity").innerHTML=acts.length?acts.map(a=>`<div class="activity-row"><div class="activity-icon">${a.type==="expense"?"€":"◷"}</div><div class="activity-main"><strong>${escapeHtml(a.title)}</strong><small>${fmtDate(a.date)} · ${escapeHtml(a.sub)}</small></div><div class="activity-value">${a.value}</div></div>`).join(""):"Aucune donnée pour le moment.";
   }
 
@@ -213,12 +216,25 @@
 
   function weekStart(offset=0){const d=new Date();const day=(d.getDay()+6)%7;d.setHours(0,0,0,0);d.setDate(d.getDate()-day+offset*7);return d;}
   function renderTime(){
-    const start=weekStart(state.weekOffset),end=new Date(start);end.setDate(end.getDate()+6);$("#weekLabel").textContent=`${fmtDate(dateISO(start))} — ${fmtDate(dateISO(end))}`;const today=dateISO();
-    $("#weekDays").innerHTML=[0,1,2,3,4,5,6].map(i=>{const d=new Date(start);d.setDate(d.getDate()+i);const iso=dateISO(d);return `<div class="day-chip ${iso===today?"active":""}"><span>${["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"][i]}</span><strong>${d.getDate()}</strong></div>`}).join("");
-    const startIso=dateISO(start),endIso=dateISO(end),logs=projectLogs().filter(x=>x.date>=startIso&&x.date<=endIso).sort((a,b)=>a.date.localeCompare(b.date)||String(a.start_time).localeCompare(String(b.start_time)));
-    $("#timeList").innerHTML=logs.length?logs.map(x=>{const c=crewCount(x),eff=effectiveMinutes(x),detail=c>1?`<small class="v13-crew-detail">${hoursLabel(x.minutes)} × ${c} personnes</small>`:"";return `<div class="list-card"><div class="list-icon">◷</div><div class="list-main"><strong>${escapeHtml(x.task)}</strong><small>${fmtDate(x.date)} · ${escapeHtml(x.lot)} · ${x.start_time?.slice(0,5)||""}${x.end_time?` → ${x.end_time.slice(0,5)}`:""} · ${money(x.hourly_rate)}/h</small>${detail}</div><div class="list-value">${hoursLabel(eff)}<br><button class="text-btn danger delete-time" data-id="${x.id}">Suppr.</button></div></div>`}).join(""):`<div class="empty-state">Aucune heure cette semaine.</div>`;
-    $$(".delete-time").forEach(b=>b.onclick=()=>deleteTime(b.dataset.id));
-  }
+  const start=weekStart(state.weekOffset),end=new Date(start);end.setDate(end.getDate()+6);
+  $("#weekLabel").textContent=`${fmtDate(dateISO(start))} — ${fmtDate(dateISO(end))}`;
+  const today=dateISO();
+  $("#weekDays").innerHTML=[0,1,2,3,4,5,6].map(i=>{
+    const d=new Date(start);d.setDate(d.getDate()+i);const iso=dateISO(d);
+    return `<div class="day-chip ${iso===today?"active":""}"><span>${["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"][i]}</span><strong>${d.getDate()}</strong></div>`;
+  }).join("");
+  const s=dateISO(start),e=dateISO(end);
+  const logs=projectLogs().filter(x=>x.date>=s&&x.date<=e).sort((a,b)=>b.date.localeCompare(a.date)||String(b.start_time||"").localeCompare(String(a.start_time||"")));
+  $("#timeList").innerHTML=logs.length?logs.map(x=>{
+    const count=crewCount(x),effective=effectiveMinutes(x);
+    const period=x.start_time&&x.end_time?`${x.start_time.slice(0,5)} → ${x.end_time.slice(0,5)}`:"Durée directe";
+    const detail=count>1?`${hoursLabel(x.minutes)} × ${count} personnes`:`${hoursLabel(x.minutes)} de travail`;
+    const canEdit=mode==="local"||x.user_id===currentUserId()||["owner","admin"].includes(currentProject()?.role);
+    return `<div class="list-card time-entry-card"><div class="list-icon">◷</div><div class="list-main"><strong>${escapeHtml(x.task||"Travaux")}</strong><small>${fmtDate(x.date)} · ${escapeHtml(x.lot||"Divers")}</small><small class="v13-crew-detail">${escapeHtml(period)} · ${detail}</small></div><div class="list-value time-entry-value">${hoursLabel(effective)}<div class="time-entry-actions">${canEdit?`<button type="button" class="text-btn edit-time" data-id="${x.id}">Modifier</button>`:""}<button type="button" class="text-btn danger delete-time" data-id="${x.id}">Suppr.</button></div></div></div>`;
+  }).join(""):`<div class="empty-state">Aucune heure cette semaine.</div>`;
+  $$(".edit-time").forEach(b=>b.onclick=()=>openTimeEditor(b.dataset.id));
+  $$(".delete-time").forEach(b=>b.onclick=()=>deleteTime(b.dataset.id));
+}
 
   function renderBilan(){
     $$("[data-bilan]").forEach(b=>b.classList.toggle("active",b.dataset.bilan===state.bilanMode));
@@ -315,6 +331,24 @@
   }
 
   async function addTime(payload){if(mode==="cloud"){const {error}=await sb.from("work_logs").insert({...payload,project_id:state.currentProjectId,user_id:session.user.id});if(error){toast(error.message);return false;}await loadCurrentProjectData();}else{state.workLogs.unshift({id:uid(),project_id:state.currentProjectId,created_at:new Date().toISOString(),...payload});localSave();}renderAll();return true;}
+  async function updateTime(id,payload){
+  const current=projectLogs().find(x=>x.id===id);
+  if(!current){toast("Cette saisie n'existe plus.");return false;}
+  if(mode==="cloud"){
+    const {data,error}=await sb.from("work_logs").update(payload).eq("id",id).eq("project_id",state.currentProjectId).select("id");
+    if(error){toast(`Modification impossible : ${error.message}`);return false;}
+    if(!data?.length){toast("Modification refusée : vérifie les droits sur cette saisie.");return false;}
+    await loadCurrentProjectData();
+  }else{
+    const idx=state.workLogs.findIndex(x=>x.id===id&&x.project_id===state.currentProjectId);
+    if(idx<0)return false;
+    state.workLogs[idx]={...state.workLogs[idx],...payload};
+    localSave();
+  }
+  renderAll();
+  return true;
+}
+
   async function deleteExpense(id){if(!confirm("Supprimer cette dépense et ses lignes ?"))return;if(mode==="cloud"){const x=projectExpenses().find(e=>e.id===id);const {error}=await sb.from("expenses").delete().eq("id",id);if(error)return toast(error.message);if(x?.receipt_path)await sb.storage.from("receipts").remove([x.receipt_path]);await loadCurrentProjectData();}else{state.expenses=state.expenses.filter(x=>x.id!==id);localSave();}renderAll();}
   async function deleteTime(id){if(!confirm("Supprimer cette saisie ?"))return;if(mode==="cloud"){const {error}=await sb.from("work_logs").delete().eq("id",id);if(error)return toast(error.message);await loadCurrentProjectData();}else{state.workLogs=state.workLogs.filter(x=>x.id!==id);localSave();}renderAll();}
 
@@ -409,6 +443,141 @@
 
   function navigate(view){$$(".view").forEach(v=>v.classList.toggle("active",v.dataset.view===view));$$(".nav-btn").forEach(b=>b.classList.toggle("active",b.dataset.go===view));closeOverlays();window.scrollTo({top:0,behavior:"smooth"});if(view==="bilan")setTimeout(renderBilan,50);}
   function minutesBetween(a,b){if(!a||!b)return 0;const [ah,am]=a.split(":").map(Number),[bh,bm]=b.split(":").map(Number);let m=(bh*60+bm)-(ah*60+am);if(m<0)m+=1440;return m;}
+  function getTimeMinutes(){
+  if(timeEntryMode==="clock"){
+    const start=$("#timeStart").value,end=$("#timeEnd").value;
+    if(!start||!end)return 0;
+    const pause=Number($("#timeBreakMinutes").value||0);
+    if(!Number.isFinite(pause)||pause<0)return 0;
+    return minutesBetween(start,end)-Math.round(pause);
+  }
+  const hours=Number($("#timeDurationOverride").value);
+  if(!Number.isFinite(hours))return 0;
+  return Math.round(hours*60);
+}
+
+  function updateTimeSummary(){
+  const mins=getTimeMinutes(),valid=mins>0&&mins<=1440;
+  const count=crewCount({crew_count:$("#timeCrewCount").value}),rate=Number($("#timeRate").value||0);
+  $("#timeLiveTotal").textContent=valid?hoursLabel(mins*count):"—";
+  $("#timeCrewHint").textContent=valid?`${hoursLabel(mins)} × ${count} personne${count>1?"s":""}`:"Vérifie la durée et la pause.";
+  $("#timeLiveCost").textContent=valid?`Coût théorique : ${money(mins*count/60*rate)}`:"La durée doit être comprise entre 1 min et 24 h.";
+  $(".time-live-summary").classList.toggle("invalid",!valid);
+  $$(".time-presets button").forEach(b=>b.classList.toggle("active",timeEntryMode==="direct"&&Math.abs(Number(b.dataset.timePreset)-Number($("#timeDurationOverride").value))<0.001));
+}
+
+  function setTimeEntryMode(next){
+  timeEntryMode=next==="clock"?"clock":"direct";
+  $("#timeDirectFields").classList.toggle("hidden",timeEntryMode!=="direct");
+  $("#timeClockFields").classList.toggle("hidden",timeEntryMode!=="clock");
+  $$("[data-time-mode]").forEach(b=>{const active=b.dataset.timeMode===timeEntryMode;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
+  updateTimeSummary();
+}
+
+  function setTimeCrew(count){
+  $("#timeCrewCount").value=String(Math.min(5,Math.max(1,Number(count)||1)));
+  $$("[data-crew]").forEach(b=>{const active=b.dataset.crew===$("#timeCrewCount").value;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
+  updateTimeSummary();
+}
+
+  function resetTimeForm(){
+  editingTimeId=null;
+  $("#timeForm").reset();
+  $("#timeModalEyebrow").textContent="Nouvelle saisie";
+  $("#timeModalTitle").textContent="Ajouter des heures";
+  $("#timeSubmit").textContent="Enregistrer les heures";
+  $("#timeDate").value=dateISO();
+  $("#timeStart").value="08:00";
+  $("#timeEnd").value="16:30";
+  $("#timeBreakMinutes").value="60";
+  $("#timeDurationOverride").value="4";
+  renderLotControls();
+  applyLotRate(true);
+  $("#timeExtras").open=false;
+  setTimeCrew(1);
+  setTimeEntryMode("direct");
+  $(".time-modal-body").scrollTop=0;
+}
+
+  function openTimeEditor(id){
+  const log=projectLogs().find(x=>x.id===id);
+  if(!log){toast("Pointage introuvable.");return;}
+  if(mode==="cloud"&&log.user_id!==currentUserId()&&!["owner","admin"].includes(currentProject()?.role)){toast("Tu ne peux modifier que tes propres pointages.");return;}
+  resetTimeForm();
+  editingTimeId=id;
+  $("#timeModalEyebrow").textContent="Modification";
+  $("#timeModalTitle").textContent="Modifier les heures";
+  $("#timeSubmit").textContent="Enregistrer les modifications";
+  $("#timeDate").value=log.date||dateISO();
+  $("#timeTask").value=log.task||"";
+  if([...$("#timeLot").options].some(o=>o.value===log.lot))$("#timeLot").value=log.lot;
+  $("#timeRate").value=String(Number(log.hourly_rate??lotDefaultRate(log.lot)));
+  $("#timeNotes").value=log.notes||"";
+  $("#timeDurationOverride").value=String(Math.round(Number(log.minutes||0)/60*100)/100);
+  setTimeCrew(crewCount(log));
+  const start=log.start_time?.slice(0,5),end=log.end_time?.slice(0,5);
+  if(start&&end){
+    $("#timeStart").value=start;$("#timeEnd").value=end;
+    const span=minutesBetween(start,end);
+    if(span>=Number(log.minutes||0)){
+      $("#timeBreakMinutes").value=String(span-Number(log.minutes||0));
+      setTimeEntryMode("clock");
+    }else setTimeEntryMode("direct");
+  }else setTimeEntryMode("direct");
+  show("#timeModal");
+  $(".time-modal-body").scrollTop=0;
+}
+
+  async function saveTimeFromForm(e){
+  e.preventDefault();
+  const form=$("#timeForm");
+  if(form.dataset.saving==="1")return;
+  const mins=getTimeMinutes(),count=crewCount({crew_count:$("#timeCrewCount").value});
+  if(!Number.isInteger(mins)||mins<=0||mins>1440){toast("Indique une durée de travail valide (maximum 24 h).");return;}
+  if(!$("#timeTask").value.trim()){toast("Indique la tâche réalisée.");return;}
+  if(!$("#timeLot").value){toast("Choisis un lot.");return;}
+  const clock=timeEntryMode==="clock";
+  const payload={
+    date:$("#timeDate").value,
+    lot:$("#timeLot").value,
+    task:$("#timeTask").value.trim(),
+    minutes:mins,
+    crew_count:count,
+    start_time:clock?$("#timeStart").value||null:null,
+    end_time:clock?$("#timeEnd").value||null:null,
+    hourly_rate:Number($("#timeRate").value||0),
+    notes:$("#timeNotes").value.trim()
+  };
+  const editId=editingTimeId,submit=$("#timeSubmit");
+  form.dataset.saving="1";submit.disabled=true;
+  try{
+    const ok=editId?await updateTime(editId,payload):await addTime(payload);
+    if(ok){
+      closeOverlays();
+      resetTimeForm();
+      toast(`${hoursLabel(mins*count)} ${editId?"mises à jour":"enregistrées"}.`);
+    }
+  }catch(error){
+    console.error(error);
+    toast("Impossible d'enregistrer les heures. Réessaie.");
+  }finally{
+    delete form.dataset.saving;submit.disabled=false;
+  }
+}
+
+  function bindTimeInputUi(){
+  $("#timeForm").onsubmit=saveTimeFromForm;
+  $$("[data-time-mode]").forEach(b=>b.onclick=()=>setTimeEntryMode(b.dataset.timeMode));
+  $$("[data-crew]").forEach(b=>b.onclick=()=>setTimeCrew(b.dataset.crew));
+  $$("[data-time-preset]").forEach(b=>b.onclick=()=>{$("#timeDurationOverride").value=b.dataset.timePreset;updateTimeSummary();});
+  $("#timeDurationMinus").onclick=()=>{const v=Number($("#timeDurationOverride").value)||0;$("#timeDurationOverride").value=String(Math.max(.25,Math.round(v*4)/4-.25));updateTimeSummary();};
+  $("#timeDurationPlus").onclick=()=>{const v=Number($("#timeDurationOverride").value)||0;$("#timeDurationOverride").value=String(Math.min(24,Math.round(v*4)/4+.25));updateTimeSummary();};
+  $("#timeBreakMinus").onclick=()=>{$("#timeBreakMinutes").value=String(Math.max(0,Number($("#timeBreakMinutes").value||0)-15));updateTimeSummary();};
+  $("#timeBreakPlus").onclick=()=>{$("#timeBreakMinutes").value=String(Math.max(0,Number($("#timeBreakMinutes").value||0)+15));updateTimeSummary();};
+  ["#timeStart","#timeEnd","#timeBreakMinutes","#timeDurationOverride","#timeRate"].forEach(sel=>{const el=$(sel);el.addEventListener("input",updateTimeSummary);el.addEventListener("change",updateTimeSummary);});
+  $("#timeLot").onchange=()=>{applyLotRate(true);updateTimeSummary();};
+}
+
   function setFormDefaults(){$("#expenseDate").value=dateISO();$("#timeDate").value=dateISO();$("#timeStart").value="08:00";$("#timeEnd").value="12:00";if($("#timeCrewCount"))$("#timeCrewCount").value="1";renderLotControls();renderPayerControl();applyLotRate(true);}
   function resetExpenseForm(){ $("#expenseForm").reset();state.pendingReceiptItems=[];state.editingExpenseId=null;state.existingReceiptUrl=null;$("#expenseModalEyebrow").textContent="Nouvelle saisie";$("#expenseModalTitle").textContent="Dépense";$("#expenseSubmit").textContent="Enregistrer la dépense";$("#receiptInput").value="";$("#expenseDate").value=dateISO();$("#receiptPreview").classList.add("hidden");$("#receiptPreview").removeAttribute("src");$("#ocrStatus").textContent="";hide("#receiptLinesSection");hide("#existingReceiptActions");renderLotControls();renderPayerControl(); }
 
@@ -419,15 +588,15 @@
     $$(".seg-btn[data-auth-tab]").forEach(b=>b.onclick=()=>{$$(".seg-btn[data-auth-tab]").forEach(x=>x.classList.remove("active"));b.classList.add("active");$("#authSubmit").textContent=b.dataset.authTab==="signup"?"Créer mon compte":"Se connecter";$("#authForm").dataset.mode=b.dataset.authTab;});
     $("#authForm").onsubmit=async e=>{e.preventDefault();if(!cloudEnabled){toast("Configure Supabase ou utilise le mode démo.");return;}const email=$("#authEmail").value.trim(),password=$("#authPassword").value,signup=e.currentTarget.dataset.mode==="signup";const result=signup?await sb.auth.signUp({email,password,options:{data:{display_name:email.split("@")[0]}}}):await sb.auth.signInWithPassword({email,password});if(result.error)return toast(result.error.message);if(signup&&!result.data.session)toast("Compte créé : vérifie ton e-mail pour confirmer l'inscription.");};
     $("#expenseForm").onsubmit=async e=>{e.preventDefault();const items=state.pendingReceiptItems.filter(i=>Number(i.amount)>0&&i.description.trim()).map(i=>({id:i.id,description:i.description.trim(),amount:Number(i.amount),lot:i.lot||$("#expenseLot").value}));const total=Number($("#expenseAmount").value),sum=items.reduce((s,i)=>s+i.amount,0);if(items.length&&sum>total+0.05)return toast("Le total des lignes dépasse le total du ticket. Corrige un montant avant d'enregistrer.");const payload={merchant:$("#expenseMerchant").value.trim(),date:$("#expenseDate").value,amount:total,vat:$("#expenseVat").value?Number($("#expenseVat").value):null,category:$("#expenseCategory").value,lot:$("#expenseLot").value,description:$("#expenseDescription").value.trim(),paid_by_user_id:$("#expensePaidBy").value||currentUserId()};const file=$("#receiptInput").files[0];const ok=state.editingExpenseId?await updateExpense(state.editingExpenseId,payload,file,items):await addExpense(payload,file,items);if(ok){const wasEdit=!!state.editingExpenseId;resetExpenseForm();closeOverlays();toast(wasEdit?"Dépense et lignes mises à jour.":(items.length?"Ticket enregistré et réparti par lot.":"Dépense enregistrée."));}};
-    $("#timeLot").onchange=()=>applyLotRate(true);
-    $("#timeForm").onsubmit=async e=>{e.preventDefault();const start=$("#timeStart").value,end=$("#timeEnd").value,override=Number($("#timeDurationOverride").value||0),mins=override?Math.round(override*60):minutesBetween(start,end),crew=Math.min(5,Math.max(1,Number($("#timeCrewCount")?.value||1)));if(mins<=0)return toast("La durée doit être supérieure à zéro.");const ok=await addTime({date:$("#timeDate").value,start_time:start||null,end_time:end||null,minutes:mins,crew_count:crew,lot:$("#timeLot").value,task:$("#timeTask").value.trim(),hourly_rate:Number($("#timeRate").value||0),notes:$("#timeNotes").value.trim()});if(ok){e.currentTarget.reset();setFormDefaults();closeOverlays();toast(`${hoursLabel(mins*crew)} enregistrées (${hoursLabel(mins)} × ${crew}).`);}};
+    // Le choix du lot et le calcul des heures sont liés dans bindTimeInputUi().
+    // Les pointages sont pris en charge par bindTimeInputUi().
     $("#projectForm").onsubmit=async e=>{e.preventDefault();await createProject({name:$("#projectNameInput").value.trim(),address:$("#projectAddressInput").value.trim(),budget:Number($("#projectBudgetInput").value||0)});e.currentTarget.reset();closeOverlays();};
     $("#lotForm").onsubmit=async e=>{e.preventDefault();const ok=await addLot($("#newLotName").value,Number($("#newLotBudget").value||0),Number($("#newLotRate").value||45));if(ok){e.currentTarget.reset();$("#newLotRate").value="45";}};
     $("#inviteForm").onsubmit=async e=>{e.preventDefault();await inviteMember($("#inviteEmail").value.trim().toLowerCase(),$("#inviteRole").value);e.currentTarget.reset();closeOverlays();};
     $("#prevWeek").onclick=()=>{state.weekOffset--;if(mode==="local")localSave();renderTime();};$("#nextWeek").onclick=()=>{state.weekOffset++;if(mode==="local")localSave();renderTime();};$("#timerToggle").onclick=()=>state.timer?stopTimer():startTimer();$("#exportCsv").onclick=exportCSV;
-    $("#logoutBtn").onclick=async()=>{closeOverlays();if(mode==="cloud")await sb.auth.signOut();else{session=null;showAuth();}};window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstallPrompt=e;});$("#installApp").onclick=async()=>{closeOverlays();if(!deferredInstallPrompt)return toast("Sur iPhone : Partager → Sur l'écran d'accueil.");deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;};setFormDefaults();
+    $("#logoutBtn").onclick=async()=>{closeOverlays();if(mode==="cloud")await sb.auth.signOut();else{session=null;showAuth();}};window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstallPrompt=e;});$("#installApp").onclick=async()=>{closeOverlays();if(!deferredInstallPrompt)return toast("Sur iPhone : Partager → Sur l'écran d'accueil.");deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;};bindTimeInputUi();setFormDefaults();
   }
-  function handleAction(action){closeOverlays();if(action==="open-expense"){resetExpenseForm();show("#expenseModal");}if(action==="scan-ticket"){resetExpenseForm();show("#expenseModal");setTimeout(()=>$("#receiptInput").click(),200);}if(action==="open-time"){show("#timeModal");$("#timeDate").value=dateISO();renderLotControls();applyLotRate(true);}if(action==="open-project")show("#projectModal");if(action==="open-invite")show("#inviteModal");if(action==="start-timer")startTimer();}
+  function handleAction(action){closeOverlays();if(action==="open-expense"){resetExpenseForm();show("#expenseModal");}if(action==="scan-ticket"){resetExpenseForm();show("#expenseModal");setTimeout(()=>$("#receiptInput").click(),200);}if(action==="open-time"){resetTimeForm();show("#timeModal");}if(action==="open-project")show("#projectModal");if(action==="open-invite")show("#inviteModal");if(action==="start-timer")startTimer();}
 
   function exportCSV(){
     const rows=[["TYPE","DATE","LOT","CATEGORIE/TACHE","DESCRIPTION","PAYE_PAR","MONTANT","HEURES","TAUX_MO","VALEUR_MO","BUDGET_LOT"]];

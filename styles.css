@@ -141,3 +141,73 @@ input:focus,select:focus,textarea:focus{border-color:var(--lavender);box-shadow:
 .v13-crew-detail{display:block;color:#6E746F;font-size:10px;font-weight:700;margin-top:3px}
 .v13-crew-field select{font-weight:800;color:#0D1B2A}
 @media(max-width:560px){.project-meta{gap:12px}.v13-project-actions{max-width:64%;justify-content:flex-end}.v13-project-actions .btn{padding:9px 10px;font-size:12px}}
+
+
+/* V1.4 — saisie de temps optimisée pour téléphone */
+.time-dialog{align-items:flex-end;padding:0;overflow:hidden}
+.time-dialog .time-modal{display:flex;flex-direction:column;width:min(610px,100%);max-height:96dvh;max-height:96vh;padding:0;overflow:hidden;border-radius:25px 25px 0 0}
+.time-modal-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:19px 20px 13px;border-bottom:1px solid var(--line);background:var(--paper)}
+.time-modal-head h2{font-size:24px;letter-spacing:-.04em;color:var(--navy);margin:3px 0 0}
+.time-modal-head .eyebrow{margin:0}
+.time-modal-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:15px 20px 22px;-webkit-overflow-scrolling:touch}
+.time-modal-body label{display:grid;gap:6px;min-width:0}
+.time-modal-body label>span:first-child{font-size:12px;font-weight:800;color:var(--muted)}
+.time-modal-body input,.time-modal-body select,.time-modal-body textarea{font-size:16px;min-width:0;width:100%;padding:12px 13px;border-radius:13px}
+.time-essentials{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:10px}
+.time-task{margin-top:12px}
+.time-section-label{font-size:12px;font-weight:900;letter-spacing:.05em;color:var(--navy);margin:20px 0 9px}
+.time-mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:4px;border-radius:14px;background:#EAE6DD}
+.time-mode-switch button{border:0;background:transparent;color:#67726D;font-weight:800;font-size:13px;min-height:42px;border-radius:11px}
+.time-mode-switch button.active{background:var(--white);color:var(--navy);box-shadow:0 2px 8px #0d1b2a14}
+.time-mode-panel{padding-top:12px}
+.time-stepper{display:grid;grid-template-columns:46px minmax(0,1fr) 46px;align-items:center;gap:10px}
+.time-stepper>button,.time-break-stepper button{border:1px solid var(--line);background:var(--white);color:var(--navy);border-radius:13px;min-height:48px;font-size:25px;font-weight:700}
+.time-stepper>label{gap:2px;text-align:center}
+.time-stepper>label>span:first-child{text-align:center;font-size:11px}
+.time-input-with-unit{display:flex;align-items:center;gap:4px;justify-content:center;border:1px solid var(--line);border-radius:13px;background:var(--white);padding:3px 10px}
+.time-input-with-unit input{border:0!important;background:transparent!important;outline:none;text-align:right;width:96px!important;font-size:24px!important;font-weight:850;padding:6px 0!important;color:var(--navy)}
+.time-input-with-unit>span{font-weight:800;color:var(--muted)}
+.time-presets{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin-top:11px}
+.time-presets button{min-height:37px;border:1px solid var(--line);background:var(--white);color:var(--navy);border-radius:11px;font-size:12px;font-weight:800;padding:4px}
+.time-presets button.active{border-color:var(--sage);background:var(--sage-soft)}
+.time-clock-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.time-clock-grid input{text-align:center;font-weight:800}
+.time-break-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+.time-break-row strong,.time-break-row small{display:block}
+.time-break-row strong{font-size:13px;color:var(--navy)}
+.time-break-row small{font-size:11px;color:var(--muted);margin-top:3px}
+.time-break-stepper{display:grid;grid-template-columns:36px 62px 36px;gap:4px;align-items:center}
+.time-break-stepper button{min-height:38px;font-size:21px}
+.time-break-stepper input{text-align:center;font-size:15px;padding:8px 3px}
+.time-crew-buttons{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.time-crew-buttons button{height:47px;border:1px solid var(--line);background:var(--white);border-radius:13px;color:var(--navy);font-size:17px;font-weight:900}
+.time-crew-buttons button.active{background:var(--navy);border-color:var(--navy);color:white}
+.time-live-summary{display:grid;grid-template-columns:1fr auto;gap:2px 12px;background:var(--sage-soft);border:1px solid #d4dfca;border-radius:17px;padding:13px 15px;margin-top:18px}
+.time-live-summary>span{color:var(--navy);font-weight:800;font-size:13px;align-self:center}
+.time-live-summary>strong{font-size:25px;letter-spacing:-.04em;color:var(--navy);text-align:right}
+.time-live-summary small{font-size:11px;color:#56684a}
+.time-live-summary #timeCrewHint{grid-column:1 / -1}
+.time-live-summary #timeLiveCost{grid-column:1 / -1;opacity:.9}
+.time-live-summary.invalid{background:#FBEAE5;border-color:#EAAFA0}
+.time-extra-details{margin-top:12px;border:1px solid var(--line);background:var(--white);border-radius:14px;overflow:hidden}
+.time-extra-details summary{cursor:pointer;font-weight:800;padding:14px 15px;font-size:13px;color:var(--navy)}
+.time-extra-details summary span{font-weight:600;font-size:11px;color:var(--muted);margin-left:8px}
+.time-extra-fields{display:grid;gap:12px;padding:0 14px 15px}
+.time-modal-footer{flex:none;padding:11px 20px calc(13px + env(safe-area-inset-bottom));background:var(--paper);border-top:1px solid var(--line);box-shadow:0 -5px 20px rgba(13,27,42,.04)}
+.time-modal-footer button{min-height:50px;font-size:15px}
+.time-modal-footer button:disabled{opacity:.55}
+.time-entry-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:7px}
+.time-entry-actions .text-btn{font-size:12px}
+.time-entry-actions .edit-time{padding:5px 9px;border:1px solid var(--line);border-radius:9px;background:var(--white);color:var(--navy)}
+.time-entry-value{white-space:nowrap}
+@media(min-width:700px){.time-dialog{align-items:center;padding:20px}.time-dialog .time-modal{border-radius:26px;max-height:90vh}}
+@media(max-width:420px){
+ .time-modal-head{padding:14px 15px 10px}.time-modal-body{padding:12px 15px 18px}.time-modal-footer{padding-left:15px;padding-right:15px}
+ .time-modal-head h2{font-size:21px}
+ .time-essentials{grid-template-columns:1fr 1fr}
+ .time-essentials input,.time-essentials select{font-size:14px;padding:11px 7px}
+ .time-stepper{grid-template-columns:42px minmax(0,1fr) 42px;gap:7px}
+ .time-stepper>button{min-height:45px}
+ .time-live-summary>strong{font-size:23px}
+}
+

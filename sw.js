@@ -1,5 +1,5 @@
-const CACHE="baticout-v1.3.4";
-const SHELL=["./","./index.html","./styles.css?v=1.3.4","./app.js?v=1.3.4","./config.js","./manifest.json","./assets/logo-mark.svg","./assets/icon-192.png","./assets/icon-512.png"];
+const CACHE="baticout-v1.4.0";
+const SHELL=["./","./index.html","./styles.css?v=1.4.0","./app.js?v=1.4.0","./config.js","./manifest.json","./assets/logo-mark.svg","./assets/icon-192.png","./assets/icon-512.png"];
 
 self.addEventListener("install",event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting()));
